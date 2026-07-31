@@ -1974,3 +1974,9 @@ Made with ☕, 💻, and ❤️
 - Generated from Issue #47
 - Issue: docs: Add deployment guide for Railway/Render in README
 - Triggered by @Bangkah
+
+## Deployment Guide (Railway & Render)
+
+- Generated from Issue #45
+- Issue: fix: Add input validation for project type and database flags in non-interactive mode
+- Triggered by @Bangkah

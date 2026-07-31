@@ -1,4 +1,14 @@
+# =======================================================
+# PENTING:
+# Setelah mengubah dependency di composer.json,
+# jalankan "composer install" lalu commit & push composer.lock
+# Workflow akan gagal jika composer.lock tidak sync.
+# =======================================================
+
 name: Publish to GitHub Packages
+
+permissions:
+  contents: write
 
 on:
   push:
@@ -19,6 +29,15 @@ jobs:
           php-version: '8.4'
           extensions: mbstring, pdo, pdo_mysql, bcmath, xml, zip, gd
 
+      - name: Assert PHP version is >= 8.4
+        run: |
+          PHP_VERSION=$(php -r 'echo PHP_VERSION;')
+          if [[ ! "$PHP_VERSION" =~ ^8\.[4-9] ]]; then
+            echo "ERROR: PHP 8.4 or higher is required. Detected: $PHP_VERSION"
+            exit 1
+          fi
+          php -v
+
       - name: Cache Composer dependencies
         uses: actions/cache@v4
         with:
@@ -30,6 +49,9 @@ jobs:
       - name: Install Composer dependencies
         run: composer install --no-interaction --prefer-dist --optimize-autoloader
 
+      - name: Validate Composer lock file is in sync
+        run: composer validate --strict
+
       - name: Prepare Laravel Application
         run: |
           cp .env.example .env
@@ -40,16 +62,17 @@ jobs:
       - name: Configure GitHub Packages Auth
         run: composer config --global github-oauth.github.com ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Ensure composer.lock is up to date
-        run: composer update --lock
-
       - name: Publish to GitHub Packages
         run: |
-          composer config repositories.github-packages composer https://packagist.pkg.github.com/Bangkah
+          composer config --global repositories.github-packages composer https://packagist.pkg.github.com/Bangkah
           composer config --global github-oauth.github.com ${{ secrets.GITHUB_TOKEN }}
           composer validate --strict
           composer install --no-interaction --prefer-dist --optimize-autoloader
-          composer publish || echo "composer publish failed, please check configuration."
+          if composer list --raw | awk '{print $1}' | grep -qx "publish"; then
+            composer publish
+          else
+            echo "composer publish command not available, skipping."
+          fi
         env:
           COMPOSER_AUTH: '{"github-oauth": {"github.com": "${{ secrets.GITHUB_TOKEN }}"}}'
       - name: Cache npm dependencies
@@ -101,7 +124,8 @@ jobs:
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
+        continue-on-error: true
         with:
           files: ./coverage.xml
-          fail_ci_if_error: true
-          token: ${{ secrets.GITHUB_TOKEN }}
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}

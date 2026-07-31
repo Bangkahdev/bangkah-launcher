@@ -12,12 +12,13 @@ use Symfony\Component\Process\Process;
 
 class StarterCreateCommand extends Command
 {
+    // Tambahkan sqlite ke dalam help signature agar user tahu itu tersedia
     protected $signature = 'bangkah:create
         {--docker : Aktifkan Docker}
         {--nginx : Gunakan Nginx (hanya jika --docker)}
         {--type= : Tipe project: web|api}
         {--auth : Sertakan auth scaffolding}
-        {--db= : Tipe database: mysql|postgres}
+        {--db= : Tipe database: mysql|postgres|sqlite}
         {--frontend= : Frontend: tailwind|bootstrap|none}
         {--yes : Auto-konfirmasi semua pilihan (non-interaktif)}';
 
@@ -26,8 +27,6 @@ class StarterCreateCommand extends Command
     public function handle(TemplateService $templates, DockerService $docker, DependencyInstaller $deps, EnvironmentService $env)
     {
         $fs = new Filesystem();
-
-        // Always scaffold current project
         $targetPath = base_path();
         $projectName = basename($targetPath);
         
@@ -36,44 +35,71 @@ class StarterCreateCommand extends Command
         $nonInteractive = (bool) $this->option('yes')
             || $this->option('docker') || $this->option('type') || $this->option('db') || $this->option('frontend') || $this->option('auth');
 
-        $useDocker = $nonInteractive
-            ? (bool) $this->option('docker')
-            : $this->confirm('Gunakan Docker?', false);
+        // 1. Tentukan Database Terlebih Dahulu (karena mempengaruhi opsi Docker)
+        if ($this->option('db')) {
+            $dbInput = strtolower($this->option('db'));
+            $dbType = match($dbInput) {
+                'postgres', 'pgsql', 'postgresql' => 'PostgreSQL',
+                'sqlite' => 'SQLite',
+                default => 'MySQL',
+            };
+        } elseif ($nonInteractive) {
+            $dbType = 'MySQL';
+        } else {
+            $dbType = $this->choice('Tipe database?', ['MySQL', 'PostgreSQL', 'SQLite'], 0);
+        }
+
+        // 2. Docker Logic (SQLite biasanya tidak pakai Docker container terpisah)
+        if ($dbType === 'SQLite') {
+            $useDocker = false; // SQLite tidak butuh Docker DB
+        } else {
+            $useDocker = $nonInteractive
+                ? (bool) $this->option('docker')
+                : $this->confirm('Gunakan Docker?', false);
+        }
 
         $useNginx = $useDocker
             ? ($nonInteractive ? (bool) $this->option('nginx') : $this->confirm('Gunakan Nginx?', true))
             : false;
 
-        $projectType = $this->option('type')
-            ? (strtolower($this->option('type')) === 'api' ? 'API' : 'Web')
-            : $this->choice('Tipe project?', ['Web', 'API'], 0);
+        // 3. Project Type
+        if ($this->option('type')) {
+            $projectType = strtolower($this->option('type')) === 'api' ? 'API' : 'Web';
+        } elseif ($nonInteractive) {
+            $projectType = 'Web';
+        } else {
+            $projectType = $this->choice('Tipe project?', ['Web', 'API'], 0);
+        }
 
         $includeAuth = $this->option('auth') ? true : ($nonInteractive ? false : $this->confirm('Include auth scaffolding?', false));
 
-        $dbType = $this->option('db')
-            ? (strtolower($this->option('db')) === 'postgres' || strtolower($this->option('db')) === 'pgsql' || strtolower($this->option('db')) === 'postgresql' ? 'PostgreSQL' : 'MySQL')
-            : $this->choice('Tipe database?', ['MySQL', 'PostgreSQL'], 0);
+        // 4. Frontend
+        if ($this->option('frontend')) {
+            $frontend = match (strtolower($this->option('frontend'))) {
+                'none' => 'None',
+                'bootstrap' => 'Bootstrap',
+                default => 'Tailwind',
+            };
+        } elseif ($nonInteractive) {
+            $frontend = 'Tailwind';
+        } else {
+            $frontend = $this->choice('Frontend?', ['Tailwind', 'Bootstrap', 'None'], 0);
+        }
 
-        $frontend = $this->option('frontend')
-            ? (match (strtolower($this->option('frontend'))) { 'none' => 'None', 'bootstrap' => 'Bootstrap', default => 'Tailwind' })
-            : $this->choice('Frontend?', ['Tailwind', 'Bootstrap', 'None'], 0);
+        // --- Eksekusi ---
 
-        // Apply templates based on project type
         if ($projectType === 'Web') {
             $templates->applyWeb($targetPath);
         } else {
             $templates->applyApi($targetPath);
         }
 
+        // Panggil EnvironmentService yang sudah mendukung SQLite & Session file
         $env->setAppName($targetPath, $projectName);
         $env->configureDatabase($targetPath, $dbType, $useDocker);
 
-        // Clean composer.json from local repositories before Docker
         if ($useDocker) {
             $this->cleanLocalRepositories($targetPath);
-        }
-
-        if ($useDocker) {
             $docker->generateCompose($targetPath, [
                 'nginx' => $useNginx,
                 'db' => strtolower($dbType) === 'postgresql' || strtolower($dbType) === 'pgsql' || strtolower($dbType) === 'postgres' ? 'postgres' : 'mysql',
@@ -98,6 +124,7 @@ class StarterCreateCommand extends Command
         }
 
         $url = $this->determineUrl($useDocker, $useNginx, $projectType);
+        
         $this->newLine();
         $this->components->info('Starter project berhasil dibuat!');
         $this->line('Nama: '.$projectName);
@@ -105,6 +132,7 @@ class StarterCreateCommand extends Command
         $this->line('Docker: '.($useDocker ? 'Ya' : 'Tidak').($useDocker && $useNginx ? ' + Nginx' : ''));
         $this->line('Database: '.$dbType);
         $this->line('Frontend: '.$frontend);
+        $this->line('Session: File (No Migration Required)');
         $this->newLine();
         $this->components->twoColumnDetail('Buka project di', $url);
 
@@ -123,31 +151,23 @@ class StarterCreateCommand extends Command
     private function determineUrl(bool $docker, bool $nginx, string $type): string
     {
         if ($docker) {
-            if ($nginx) {
-                return 'http://localhost:8080';
-            }
-            return 'http://localhost:8000';
+            return $nginx ? 'http://localhost:8080' : 'http://localhost:8000';
         }
-        return $type === 'Web' ? 'http://localhost:8000' : 'http://localhost:8000/api/health';
+        
+        // Untuk lokal tanpa Docker, beri tahu user untuk menjalankan serve
+        return 'http://localhost:8000 (Jalankan php artisan serve)';
     }
 
     private function cleanLocalRepositories(string $targetPath): void
     {
         $composerFile = $targetPath . '/composer.json';
-        
-        if (! file_exists($composerFile)) {
-            return;
-        }
+        if (! file_exists($composerFile)) return;
         
         $composer = json_decode(file_get_contents($composerFile), true);
-        
-        if (! $composer) {
-            return;
-        }
+        if (! $composer) return;
         
         $modified = false;
         
-        // Remove repositories with type "path"
         if (isset($composer['repositories'])) {
             foreach ($composer['repositories'] as $key => $repo) {
                 if (is_array($repo) && isset($repo['type']) && $repo['type'] === 'path') {
@@ -155,17 +175,13 @@ class StarterCreateCommand extends Command
                     $modified = true;
                 }
             }
-            
-            // If repositories is empty, remove it entirely
             if (empty($composer['repositories'])) {
                 unset($composer['repositories']);
             } else {
-                // Re-index array to fix JSON structure
                 $composer['repositories'] = array_values($composer['repositories']);
             }
         }
         
-        // Remove bangkah/bangkah from require if it exists (it's just a scaffolding tool)
         if (isset($composer['require']['bangkah/bangkah'])) {
             unset($composer['require']['bangkah/bangkah']);
             $modified = true;
@@ -173,8 +189,6 @@ class StarterCreateCommand extends Command
         
         if ($modified) {
             file_put_contents($composerFile, json_encode($composer, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
-            
-            // Delete composer.lock to force fresh install
             if (file_exists($targetPath . '/composer.lock')) {
                 unlink($targetPath . '/composer.lock');
             }

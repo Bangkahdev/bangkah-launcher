@@ -1,131 +1,29 @@
-# =======================================================
-# PENTING:
-# Setelah mengubah dependency di composer.json,
-# jalankan "composer install" lalu commit & push composer.lock
-# Workflow akan gagal jika composer.lock tidak sync.
-# =======================================================
-
-name: Publish to GitHub Packages
-
-permissions:
-  contents: write
+name: Auto Issue Resolver Bot
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
-  release:
-    types: [published]
+  issue_comment:
+    types: [created]
 
 jobs:
-  publish:
+  resolve-issue:
+    if: contains(github.event.comment.body, '/run-bot')
     runs-on: ubuntu-latest
-    environment: GITHUB_TOKEN
+
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.4'
-          extensions: mbstring, pdo, pdo_mysql, bcmath, xml, zip, gd
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      - name: Assert PHP version is >= 8.4
+      - name: Process Issue Task
         run: |
-          PHP_VERSION=$(php -r 'echo PHP_VERSION;')
-          if [[ ! "$PHP_VERSION" =~ ^8\.[4-9] ]]; then
-            echo "ERROR: PHP 8.4 or higher is required. Detected: $PHP_VERSION"
-            exit 1
-          fi
-          php -v
+          echo "" >> README.md
+          echo "## Updated via Issue #${{ github.event.issue.number }}" >> README.md
+          echo "Task resolved: ${{ github.event.issue.title }}" >> README.md
 
-      - name: Cache Composer dependencies
-        uses: actions/cache@v4
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
         with:
-          path: vendor
-          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-composer-
-
-      - name: Install Composer dependencies
-        run: composer install --no-interaction --prefer-dist --optimize-autoloader
-
-      - name: Validate Composer lock file is in sync
-        run: composer validate --strict
-
-      - name: Prepare Laravel Application
-        run: |
-          cp .env.example .env
-          mkdir -p storage/logs bootstrap/cache
-          chmod -R 777 storage bootstrap/cache
-          php artisan key:generate
-
-      - name: Configure GitHub Packages Auth
-        run: composer config --global github-oauth.github.com ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish to GitHub Packages
-        run: |
-          composer config --global repositories.github-packages composer https://packagist.pkg.github.com/Bangkah
-          composer config --global github-oauth.github.com ${{ secrets.GITHUB_TOKEN }}
-          composer validate --strict
-          composer install --no-interaction --prefer-dist --optimize-autoloader
-          if composer list --raw | awk '{print $1}' | grep -qx "publish"; then
-            composer publish
-          else
-            echo "composer publish command not available, skipping."
-          fi
-        env:
-          COMPOSER_AUTH: '{"github-oauth": {"github.com": "${{ secrets.GITHUB_TOKEN }}"}}'
-      - name: Cache npm dependencies
-        uses: actions/cache@v4
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-npm-
-
-      - name: Build release archive
-        run: |
-          mkdir -p dist
-          git archive --format=zip --output=dist/bangkah-$(date +'%Y%m%d').zip HEAD
-
-      - name: Generate SHA256SUMS
-        run: |
-          chmod +x scripts/generate-release-checksums.sh
-          ./scripts/generate-release-checksums.sh dist
-
-      - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-artifacts
-          path: dist/
-
-      - name: Create GitHub Release and Upload Artifacts
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/bangkah-*.zip
-            dist/SHA256SUMS
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Update CHANGELOG.md
-        uses: heinrichreimer/github-changelog-generator-action@v2.3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          output: CHANGELOG.md
-
-      - name: Commit and push updated CHANGELOG.md
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md
-          git commit -m "chore: update changelog [skip ci]" || echo "No changes to commit"
-          git push origin HEAD:main || echo "No changes to push"
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        continue-on-error: true
-        with:
-          files: ./coverage.xml
-          fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
+          token: ${{ secrets.PAT_TOKEN }}
+          commit-message: "fix: resolve issue #${{ github.event.issue.number }}"
+          branch: "bot/issue-${{ github.event.issue.number }}"
+          title: "fix: auto resolve #${{ github.event.issue.number }}"
+          body: "Automated PR generated from Issue #${{ github.event.issue.number }}"

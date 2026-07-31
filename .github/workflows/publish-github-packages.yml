@@ -2,31 +2,56 @@ name: Auto Issue Resolver Bot
 
 on:
   issue_comment:
-    types: [created]
+    types:
+      - created
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
 
 jobs:
   resolve-issue:
-    if: contains(github.event.comment.body, '/run-bot')
+    if: |
+      github.event.issue.state == 'open' &&
+      contains(github.event.comment.body, '/run-bot')
+
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.PAT_TOKEN }}
 
-      - name: Process Issue Task
+      - name: Update README
         run: |
-          echo "" >> README.md
-          echo "## Deployment Guide (Railway & Render)" >> README.md
-          echo "Task resolved: ${{ github.event.issue.title }}" >> README.md
+          {
+            echo ""
+            echo "## Deployment Guide (Railway & Render)"
+            echo ""
+            echo "- Generated from Issue #${{ github.event.issue.number }}"
+            echo "- Issue: ${{ github.event.issue.title }}"
+            echo "- Triggered by @${{ github.event.comment.user.login }}"
+          } >> README.md
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.PAT_TOKEN }}
-          commit-message: "fix: resolve issue #${{ github.event.issue.number }}"
-          branch: "bot/issue-${{ github.event.issue.number }}"
+          branch: bot/issue-${{ github.event.issue.number }}
           delete-branch: true
-          title: "fix: auto resolve #${{ github.event.issue.number }}"
-          body: "Automated PR generated from Issue #${{ github.event.issue.number }}"
+          commit-message: |
+            docs: update README for issue #${{ github.event.issue.number }}
+          title: |
+            docs: Resolve #${{ github.event.issue.number }}
+          body: |
+            ## Automated Pull Request
+
+            This PR was automatically generated.
+
+            **Issue:** #${{ github.event.issue.number }}
+            **Title:** ${{ github.event.issue.title }}
+
+            Triggered by:
+            @${{ github.event.comment.user.login }}
+
+            Closes #${{ github.event.issue.number }}

@@ -1962,3 +1962,9 @@ Every bit helps make Bangkah better!
 Made with ☕, 💻, and ❤️
 
 </div>
+
+## Deployment Guide (Railway & Render)
+
+- Generated from Issue #46
+- Issue: feat: Add SQLite support option to the interactive CLI wizard
+- Triggered by @Bangkah

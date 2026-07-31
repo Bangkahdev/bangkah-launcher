@@ -1968,3 +1968,9 @@ Made with ☕, 💻, and ❤️
 - Generated from Issue #46
 - Issue: feat: Add SQLite support option to the interactive CLI wizard
 - Triggered by @Bangkah
+
+## Deployment Guide (Railway & Render)
+
+- Generated from Issue #47
+- Issue: docs: Add deployment guide for Railway/Render in README
+- Triggered by @Bangkah

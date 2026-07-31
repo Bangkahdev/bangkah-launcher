@@ -18,14 +18,15 @@ jobs:
       - name: Process Issue Task
         run: |
           echo "" >> README.md
-          echo "## Updated via Issue #${{ github.event.issue.number }}" >> README.md
-          echo "Task resolved: ${{ github.event.issue.title }}" >> README.md
+          echo "## Deployment Guide (Railway & Render)" >> README.md
+          echo "Updated automatically via Issue #${{ github.event.issue.number }}" >> README.md
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.PAT_TOKEN }}
-          commit-message: "fix: resolve issue #${{ github.event.issue.number }}"
+          commit-message: "docs: add deployment guide (#${{ github.event.issue.number }})"
           branch: "bot/issue-${{ github.event.issue.number }}"
-          title: "fix: auto resolve #${{ github.event.issue.number }}"
+          delete-branch: true
+          title: "docs: add Railway & Render deployment guide (#${{ github.event.issue.number }})"
           body: "Automated PR generated from Issue #${{ github.event.issue.number }}"

@@ -1980,3 +1980,9 @@ Made with ☕, 💻, and ❤️
 - Generated from Issue #45
 - Issue: fix: Add input validation for project type and database flags in non-interactive mode
 - Triggered by @Bangkah
+
+## Deployment Guide (Railway & Render)
+
+- Generated from Issue #65
+- Issue: update depencies
+- Triggered by @Bangkah

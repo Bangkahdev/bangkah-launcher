@@ -1980,3 +1980,7 @@ Made with ☕, 💻, and ❤️
 - Generated from Issue #45
 - Issue: fix: Add input validation for project type and database flags in non-interactive mode
 - Triggered by @Bangkah
+
+---
+
+Bagian dari gudang project publik **[Bangkah](https://bangkah.tech)** — dokumentasi dan alat developer di satu domain.

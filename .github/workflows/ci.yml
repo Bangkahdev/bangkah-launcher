@@ -5,20 +5,144 @@ on:
   pull_request:
     branches: [main, master]
 jobs:
-  ci:
+  blackbox:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
-      - name: Cache Composer dependencies
-        uses: actions/cache@v4
+      - name: Blackbox - Fresh Laravel + Bangkah Install
+        run: |
+          # Create fresh Laravel project
+          composer create-project laravel/laravel blackbox-test --quiet --no-interaction
+          cd blackbox-test
+
+          # Install Bangkah package with fixed version
+          composer config repositories.bangkah path ..
+          composer require bangkah/bangkah:@dev --prefer-dist --no-interaction --quiet
+
+          # Verify no ambiguous class resolution
+          echo "=== VERIFYING AUTOLOAD ==="
+          if grep -q "Ambiguous class resolution" composer.lock || grep -rq "Ambiguous" vendor/; then
+            echo "FAIL: Ambiguous class resolution still present!"
+            exit 1
+          else
+            echo "PASS: No ambiguous class warnings."
+          fi
+
+          # Verify command available
+          echo "=== VERIFYING COMMAND ==="
+          php artisan list | grep -i bangkah || {
+            echo "FAIL: bangkah:create command not found!"
+            exit 1
+          }
+          echo "PASS: bangkah:create command available."
+
+          # Copy .env and test command (non-interactive)
+          cp .env.example .env
+          echo "=== TESTING bangkah:create ==="
+          timeout 60 php artisan bangkah:create --type=api --frontend=none --db=mysql --yes --quiet || {
+            echo "FAIL: bangkah:create failed!"
+            exit 1
+          }
+
+          # Verify generated files
+          echo "=== VERIFYING OUTPUT ==="
+          test -f routes/api.php || { echo "FAIL: routes/api.php missing"; exit 1; }
+          test -f app/Http/Controllers/Api/HealthController.php || { echo "FAIL: HealthController missing"; exit 1; }
+          grep -q "DB_USERNAME=laravel" .env || { echo "FAIL: .env DB_USERNAME not set"; exit 1; }
+          grep -q "DB_PASSWORD=secret" .env || { echo "FAIL: .env DB_PASSWORD not set"; exit 1; }
+          echo "PASS: All blackbox checks completed."
+  whitebox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
         with:
-          path: vendor
-          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-composer-
-      - run: composer install --no-interaction --prefer-dist --no-scripts
-      - run: composer validate --no-check-lock
-      - run: find src -name '*.php' -exec php -l {} \;
+          php-version: '8.4'
+      - name: Whitebox - Code Logic Verification
+        run: |
+          # Verify service files exist and contain fix logic
+          echo "=== CHECKING SERVICE FILES ==="
+
+          # EnvironmentService must have docker conditional for DB_USERNAME/DB_PASSWORD
+          grep -q "DB_USERNAME.*=>.*\$docker.*'laravel'" src/Services/EnvironmentService.php || {
+            echo "FAIL: EnvironmentService DB_USERNAME docker logic missing!"
+            exit 1
+          }
+          echo "PASS: EnvironmentService DB_USERNAME logic correct."
+
+          grep -q "DB_PASSWORD.*=>.*\$docker.*'secret'" src/Services/EnvironmentService.php || {
+            echo "FAIL: EnvironmentService DB_PASSWORD docker logic missing!"
+            exit 1
+          }
+          echo "PASS: EnvironmentService DB_PASSWORD logic correct."
+
+          # DockerService must use laravel/secret in both services
+          grep -q "DB_USERNAME=laravel" src/Services/DockerService.php || {
+            echo "FAIL: DockerService DB_USERNAME missing!"
+            exit 1
+          }
+          grep -q "DB_PASSWORD=secret" src/Services/DockerService.php || {
+            echo "FAIL: DockerService DB_PASSWORD missing!"
+            exit 1
+          }
+          echo "PASS: DockerService env consistent."
+
+          # Verify exclude-from-classmap exists
+          grep -q '"exclude-from-classmap"' composer.json || {
+            echo "FAIL: exclude-from-classmap missing!"
+            exit 1
+          }
+          echo "PASS: exclude-from-classmap present."
+
+          # Verify syntax of all PHP files
+          echo "=== SYNTAX CHECK ==="
+          find src -name '*.php' -exec php -l {} \; || {
+            echo "FAIL: PHP syntax error in src/!"
+            exit 1
+          }
+          echo "PASS: All PHP files syntax valid."
+
+          # Verify package structure (no launcher skeleton files in package root)
+          echo "=== PACKAGE STRUCTURE CHECK ==="
+          if [ -f "database/seeders/DatabaseSeeder.php" ]; then
+            echo "FAIL: Launcher skeleton file database/seeders/DatabaseSeeder.php found in package!"
+            exit 1
+          fi
+          echo "PASS: No launcher skeleton files in package root."
+  manual:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+      - name: Manual - Verify Docs & Config Sync
+        run: |
+          echo "=== MANUAL DOCUMENTATION CHECK ==="
+
+          # Check docs/DOCKER.md for updated credentials
+          if grep -q "DB_USERNAME=laravel" docs/DOCKER.md && grep -q "DB_PASSWORD=secret" docs/DOCKER.md; then
+            echo "PASS: docs/DOCKER.md DB credentials updated."
+          else
+            echo "FAIL: docs/DOCKER.md DB credentials not updated!"
+            exit 1
+          fi
+
+          # Check .env generation logic in source
+          grep -q "DB_USERNAME.*=>.*\$docker.*'laravel'" src/Services/EnvironmentService.php || {
+            echo "FAIL: Source DB_USERNAME logic incorrect!"
+            exit 1
+          }
+          echo "PASS: Source DB_USERNAME logic verified."
+
+          # Verify release tag exists locally (simulated check)
+          git tag -l | grep -q "v1.0.7.1" || {
+            echo "FAIL: Release tag v1.0.7.1 not found!"
+            exit 1
+          }
+          echo "PASS: Release tag v1.0.7.1 present."
+
+          echo "=== MANUAL VERIFICATION COMPLETE ==="

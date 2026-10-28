@@ -20,19 +20,5 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-composer-
       - run: composer install --no-interaction --prefer-dist --no-scripts
-      - run: cp .env.example .env
-      - run: php artisan key:generate
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Cache npm dependencies
-        uses: actions/cache@v4
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-npm-
-      - run: npm install
-      - run: npm run build
       - run: composer validate
       - run: find src -name '*.php' -exec php -l {} \;

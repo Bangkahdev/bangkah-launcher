@@ -22,9 +22,9 @@ For MySQL:
 DB_CONNECTION=mysql
 DB_HOST=db
 DB_PORT=3306
-DB_DATABASE=bangkah_db
-DB_USERNAME=bangkah_user
-DB_PASSWORD=bangkah_pass
+DB_DATABASE=laravel
+DB_USERNAME=laravel
+DB_PASSWORD=secret
 ```
 
 ## Port Conflicts

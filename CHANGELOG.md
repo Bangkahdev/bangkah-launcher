@@ -1,5 +1,10 @@
 # Changelog
 
+## [v1.0.7.1](https://github.com/Bangkah/bangkah-launcher/tree/v1.0.7.1) (2026-10-28)
+
+- Fix Docker DB credentials sync (`DB_USERNAME=laravel`, `DB_PASSWORD=secret`) between `.env`, `docker-compose.yml`, dan Docker service env
+- Fix CI pipeline (`--no-scripts`, `composer validate`)
+
 ## [v1.0.19](https://github.com/Bangkah/bangkah-launcher/tree/v1.0.19) (2026-05-06)
 
 [Full Changelog](https://github.com/Bangkah/bangkah-launcher/compare/v1.0.18...v1.0.19)

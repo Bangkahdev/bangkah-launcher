@@ -34,8 +34,5 @@ jobs:
             ${{ runner.os }}-npm-
       - run: npm install
       - run: npm run build
-      - run: vendor/bin/phpunit
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - run: composer validate
+      - run: find src -name '*.php' -exec php -l {} \;

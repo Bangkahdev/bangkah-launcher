@@ -37,10 +37,5 @@
                     "symfony/process":  "^6.4|^7.0|^8.0"
                 },
     "minimum-stability":  "stable",
-    "prefer-stable":  true,
-    "repositories": [{
-        "name": "bangkah",
-        "type": "path",
-        "url": "C:\\Users\\atha\\Documents\\laravel\\bangkah-launcher"
-    }]
+    "prefer-stable":  true
 }

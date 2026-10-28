@@ -4,145 +4,203 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+
 jobs:
-  blackbox:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.4'
-      - name: Blackbox - Fresh Laravel + Bangkah Install
-        run: |
-          # Create fresh Laravel project
-          composer create-project laravel/laravel blackbox-test --quiet --no-interaction
-          cd blackbox-test
-
-          # Install Bangkah package with fixed version
-          composer config repositories.bangkah path ..
-          composer require bangkah/bangkah:@dev --prefer-dist --no-interaction --quiet
-
-          # Verify no ambiguous class resolution
-          echo "=== VERIFYING AUTOLOAD ==="
-          if grep -q "Ambiguous class resolution" composer.lock || grep -rq "Ambiguous" vendor/; then
-            echo "FAIL: Ambiguous class resolution still present!"
-            exit 1
-          else
-            echo "PASS: No ambiguous class warnings."
-          fi
-
-          # Verify command available
-          echo "=== VERIFYING COMMAND ==="
-          php artisan list | grep -i bangkah || {
-            echo "FAIL: bangkah:create command not found!"
-            exit 1
-          }
-          echo "PASS: bangkah:create command available."
-
-          # Copy .env and test command (non-interactive)
-          cp .env.example .env
-          echo "=== TESTING bangkah:create ==="
-          timeout 60 php artisan bangkah:create --type=api --frontend=none --db=mysql --yes --quiet || {
-            echo "FAIL: bangkah:create failed!"
-            exit 1
-          }
-
-          # Verify generated files
-          echo "=== VERIFYING OUTPUT ==="
-          test -f routes/api.php || { echo "FAIL: routes/api.php missing"; exit 1; }
-          test -f app/Http/Controllers/Api/HealthController.php || { echo "FAIL: HealthController missing"; exit 1; }
-          grep -q "DB_USERNAME=laravel" .env || { echo "FAIL: .env DB_USERNAME not set"; exit 1; }
-          grep -q "DB_PASSWORD=secret" .env || { echo "FAIL: .env DB_PASSWORD not set"; exit 1; }
-          echo "PASS: All blackbox checks completed."
   whitebox:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
-      - name: Whitebox - Code Logic Verification
+          coverage: none
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-scripts
+      - name: Validate composer.json
+        run: composer validate --no-check-lock
+      - name: PHP syntax check
+        run: find src -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Package metadata
         run: |
-          # Verify service files exist and contain fix logic
-          echo "=== CHECKING SERVICE FILES ==="
+          set -euo pipefail
+          php -r '$c=json_decode(file_get_contents("composer.json"),true); if (($c["name"] ?? "") !== "bangkah/bangkah") { fwrite(STDERR,"FAIL: wrong package name\n"); exit(1);} if (($c["type"] ?? "") !== "library") { fwrite(STDERR,"FAIL: type is not library\n"); exit(1);} if (empty($c["autoload"]["exclude-from-classmap"])) { fwrite(STDERR,"FAIL: exclude-from-classmap missing\n"); exit(1);} echo "PASS: package metadata\n";'
+      - name: Package structure (must not ship launcher skeleton)
+        run: |
+          set -euo pipefail
+          for dir in app database routes resources public tests storage bootstrap config; do
+            if [ -e "$dir" ]; then
+              echo "FAIL: launcher skeleton '$dir' found in package root"
+              exit 1
+            fi
+          done
+          echo "PASS: package structure is library-only"
+      - name: Service logic (credentials consistency)
+        run: |
+          set -euo pipefail
+          grep -q "DB_USERNAME.*docker.*laravel" src/Services/EnvironmentService.php
+          grep -q "DB_PASSWORD.*docker.*secret" src/Services/EnvironmentService.php
+          grep -q "DB_USERNAME.*docker.*root" src/Services/EnvironmentService.php
+          grep -q "DB_USERNAME=laravel" src/Services/DockerService.php
+          grep -q "DB_PASSWORD=secret" src/Services/DockerService.php
+          grep -q "MYSQL_USER=laravel" src/Services/DockerService.php
+          grep -q "MYSQL_PASSWORD=secret" src/Services/DockerService.php
+          grep -q "POSTGRES_USER=laravel" src/Services/DockerService.php
+          grep -q "POSTGRES_PASSWORD=secret" src/Services/DockerService.php
+          echo "PASS: service credentials consistent"
+      - name: Unit test EnvironmentService
+        run: |
+          set -euo pipefail
+          cat > /tmp/env_test.php <<'PHP'
+          <?php
+          require getcwd().'/vendor/autoload.php';
 
-          # EnvironmentService must have docker conditional for DB_USERNAME/DB_PASSWORD
-          grep -q "DB_USERNAME.*=>.*\$docker.*'laravel'" src/Services/EnvironmentService.php || {
-            echo "FAIL: EnvironmentService DB_USERNAME docker logic missing!"
-            exit 1
-          }
-          echo "PASS: EnvironmentService DB_USERNAME logic correct."
+          use Bangkah\Starter\Services\EnvironmentService;
 
-          grep -q "DB_PASSWORD.*=>.*\$docker.*'secret'" src/Services/EnvironmentService.php || {
-            echo "FAIL: EnvironmentService DB_PASSWORD docker logic missing!"
-            exit 1
-          }
-          echo "PASS: EnvironmentService DB_PASSWORD logic correct."
+          $dir = sys_get_temp_dir().'/bangkah-env-'.uniqid();
+          mkdir($dir, 0777, true);
 
-          # DockerService must use laravel/secret in both services
-          grep -q "DB_USERNAME=laravel" src/Services/DockerService.php || {
-            echo "FAIL: DockerService DB_USERNAME missing!"
-            exit 1
-          }
-          grep -q "DB_PASSWORD=secret" src/Services/DockerService.php || {
-            echo "FAIL: DockerService DB_PASSWORD missing!"
-            exit 1
-          }
-          echo "PASS: DockerService env consistent."
+          $base = implode("\n", [
+              'DB_CONNECTION=sqlite',
+              'DB_HOST=',
+              'DB_PORT=',
+              'DB_DATABASE=',
+              'DB_USERNAME=sentinel',
+              'DB_PASSWORD=sentinel',
+              'SESSION_DRIVER=cookie',
+              'CACHE_STORE=database',
+              'QUEUE_CONNECTION=database',
+          ])."\n";
+          file_put_contents($dir.'/.env', $base);
+          file_put_contents($dir.'/.env.example', $base);
 
-          # Verify exclude-from-classmap exists
-          grep -q '"exclude-from-classmap"' composer.json || {
-            echo "FAIL: exclude-from-classmap missing!"
-            exit 1
+          function parse_env(string $path): array
+          {
+              $out = [];
+              foreach (preg_split('/\R/', file_get_contents($path)) as $line) {
+                  if (preg_match('/^([A-Z0-9_]+)=(.*)$/', $line, $m)) {
+                      $out[$m[1]] = $m[2];
+                  }
+              }
+              return $out;
           }
-          echo "PASS: exclude-from-classmap present."
 
-          # Verify syntax of all PHP files
-          echo "=== SYNTAX CHECK ==="
-          find src -name '*.php' -exec php -l {} \; || {
-            echo "FAIL: PHP syntax error in src/!"
-            exit 1
+          function expect(array $env, string $key, string $value): void
+          {
+              if (($env[$key] ?? null) !== $value) {
+                  fwrite(STDERR, "FAIL: $key expected '".$value."' got '".($env[$key] ?? 'null')."'\n");
+                  exit(1);
+              }
           }
-          echo "PASS: All PHP files syntax valid."
 
-          # Verify package structure (no launcher skeleton files in package root)
-          echo "=== PACKAGE STRUCTURE CHECK ==="
-          if [ -f "database/seeders/DatabaseSeeder.php" ]; then
-            echo "FAIL: Launcher skeleton file database/seeders/DatabaseSeeder.php found in package!"
-            exit 1
-          fi
-          echo "PASS: No launcher skeleton files in package root."
-  manual:
+          $svc = new EnvironmentService();
+
+          $svc->configureDatabase($dir, 'MySQL', true);
+          $env = parse_env($dir.'/.env');
+          expect($env, 'DB_CONNECTION', 'mysql');
+          expect($env, 'DB_HOST', 'db');
+          expect($env, 'DB_PORT', '3306');
+          expect($env, 'DB_DATABASE', 'laravel');
+          expect($env, 'DB_USERNAME', 'laravel');
+          expect($env, 'DB_PASSWORD', 'secret');
+          expect($env, 'SESSION_DRIVER', 'file');
+
+          $svc->configureDatabase($dir, 'PostgreSQL', false);
+          $env = parse_env($dir.'/.env');
+          expect($env, 'DB_CONNECTION', 'pgsql');
+          expect($env, 'DB_HOST', '127.0.0.1');
+          expect($env, 'DB_PORT', '5432');
+          expect($env, 'DB_USERNAME', 'root');
+          expect($env, 'DB_PASSWORD', '');
+
+          $svc->configureDatabase($dir, 'SQLite', false);
+          $env = parse_env($dir.'/.env');
+          expect($env, 'DB_CONNECTION', 'sqlite');
+          expect($env, 'DB_DATABASE', 'database.sqlite');
+          expect($env, 'DB_USERNAME', '');
+          expect($env, 'DB_PASSWORD', '');
+          if (! file_exists($dir.'/database/database.sqlite')) {
+              fwrite(STDERR, "FAIL: sqlite database file not created\n");
+              exit(1);
+          }
+
+          $example = parse_env($dir.'/.env.example');
+          expect($example, 'DB_CONNECTION', 'sqlite');
+
+          echo "PASS: EnvironmentService unit tests\n";
+          PHP
+          php /tmp/env_test.php
+
+  blackbox:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
-      - name: Manual - Verify Docs & Config Sync
+          coverage: none
+      - name: Fresh Laravel + install package
         run: |
-          echo "=== MANUAL DOCUMENTATION CHECK ==="
-
-          # Check docs/DOCKER.md for updated credentials
-          if grep -q "DB_USERNAME=laravel" docs/DOCKER.md && grep -q "DB_PASSWORD=secret" docs/DOCKER.md; then
-            echo "PASS: docs/DOCKER.md DB credentials updated."
-          else
-            echo "FAIL: docs/DOCKER.md DB credentials not updated!"
+          set -euo pipefail
+          composer create-project laravel/laravel blackbox-test --no-interaction --quiet
+          cd blackbox-test
+          composer config repositories.bangkah path ..
+          composer require bangkah/bangkah:@dev --prefer-dist --no-interaction 2>&1 | tee /tmp/require.log
+          if grep -q "Ambiguous class resolution" /tmp/require.log; then
+            echo "FAIL: Ambiguous class resolution during install"
             exit 1
           fi
-
-          # Check .env generation logic in source
-          grep -q "DB_USERNAME.*=>.*\$docker.*'laravel'" src/Services/EnvironmentService.php || {
-            echo "FAIL: Source DB_USERNAME logic incorrect!"
+          composer dump-autoload -o 2>&1 | tee /tmp/autoload.log
+          if grep -q "Ambiguous class resolution" /tmp/autoload.log; then
+            echo "FAIL: Ambiguous class resolution during dump-autoload"
             exit 1
-          }
-          echo "PASS: Source DB_USERNAME logic verified."
-
-          # Verify release tag exists locally (simulated check)
-          git tag -l | grep -q "v1.0.7.1" || {
-            echo "FAIL: Release tag v1.0.7.1 not found!"
+          fi
+          echo "PASS: no ambiguous class resolution"
+      - name: Command is registered
+        run: |
+          set -euo pipefail
+          cd blackbox-test
+          php artisan list --raw | grep -q "bangkah:create"
+          echo "PASS: bangkah:create registered"
+      - name: Scaffold API project (local, non-docker)
+        run: |
+          set -euo pipefail
+          cd blackbox-test
+          cp .env.example .env
+          php artisan bangkah:create --type=api --frontend=none --db=mysql --yes
+      - name: Verify generated output
+        run: |
+          set -euo pipefail
+          cd blackbox-test
+          test -f routes/api.php || { echo "FAIL: routes/api.php missing"; exit 1; }
+          test -f app/Http/Controllers/Api/HealthController.php || { echo "FAIL: HealthController missing"; exit 1; }
+          grep -q '^APP_NAME="blackbox-test"$' .env || { echo "FAIL: APP_NAME not set"; exit 1; }
+          grep -q '^DB_CONNECTION=mysql$' .env || { echo "FAIL: DB_CONNECTION"; exit 1; }
+          grep -q '^DB_HOST=127.0.0.1$' .env || { echo "FAIL: DB_HOST (local)"; exit 1; }
+          grep -q '^DB_DATABASE=laravel$' .env || { echo "FAIL: DB_DATABASE"; exit 1; }
+          grep -q '^DB_USERNAME=root$' .env || { echo "FAIL: DB_USERNAME (local)"; exit 1; }
+          grep -q '^DB_PASSWORD=$' .env || { echo "FAIL: DB_PASSWORD (local)"; exit 1; }
+          grep -q '^SESSION_DRIVER=file$' .env || { echo "FAIL: SESSION_DRIVER"; exit 1; }
+          composer dump-autoload -o 2>&1 | tee /tmp/autoload2.log
+          if grep -q "Ambiguous class resolution" /tmp/autoload2.log; then
+            echo "FAIL: Ambiguous class resolution after scaffolding"
             exit 1
-          }
-          echo "PASS: Release tag v1.0.7.1 present."
+          fi
+          echo "PASS: generated output verified"
 
-          echo "=== MANUAL VERIFICATION COMPLETE ==="
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Documentation and config sync
+        run: |
+          set -euo pipefail
+          grep -q "DB_USERNAME=laravel" docs/DOCKER.md || { echo "FAIL: docs/DOCKER.md DB_USERNAME"; exit 1; }
+          grep -q "DB_PASSWORD=secret" docs/DOCKER.md || { echo "FAIL: docs/DOCKER.md DB_PASSWORD"; exit 1; }
+          grep -q "DB_USERNAME=laravel" src/Services/DockerService.php || { echo "FAIL: DockerService DB_USERNAME"; exit 1; }
+          grep -q "MYSQL_USER=laravel" src/Services/DockerService.php || { echo "FAIL: mysql service user mismatch"; exit 1; }
+          grep -q "MYSQL_PASSWORD=secret" src/Services/DockerService.php || { echo "FAIL: mysql service password mismatch"; exit 1; }
+          grep -q "composer require bangkah/bangkah" README.md || { echo "FAIL: README install command"; exit 1; }
+          echo "PASS: documentation and config in sync"

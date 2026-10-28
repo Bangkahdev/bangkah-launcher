@@ -19,7 +19,7 @@ jobs:
           key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
           restore-keys: |
             ${{ runner.os }}-composer-
-      - run: composer install --no-interaction --prefer-dist
+      - run: composer install --no-interaction --prefer-dist --no-scripts
       - run: cp .env.example .env
       - run: php artisan key:generate
       - uses: actions/setup-node@v4

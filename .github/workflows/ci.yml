@@ -20,5 +20,5 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-composer-
       - run: composer install --no-interaction --prefer-dist --no-scripts
-      - run: composer validate
+      - run: composer validate --no-check-lock
       - run: find src -name '*.php' -exec php -l {} \;

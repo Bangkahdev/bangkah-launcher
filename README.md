@@ -1962,3 +1962,25 @@ Every bit helps make Bangkah better!
 Made with ☕, 💻, and ❤️
 
 </div>
+
+## Deployment Guide (Railway & Render)
+
+- Generated from Issue #46
+- Issue: feat: Add SQLite support option to the interactive CLI wizard
+- Triggered by @Bangkah
+
+## Deployment Guide (Railway & Render)
+
+- Generated from Issue #47
+- Issue: docs: Add deployment guide for Railway/Render in README
+- Triggered by @Bangkah
+
+## Deployment Guide (Railway & Render)
+
+- Generated from Issue #45
+- Issue: fix: Add input validation for project type and database flags in non-interactive mode
+- Triggered by @Bangkah
+
+---
+
+Bagian dari gudang project publik **[Bangkah](https://bangkah.tech)** — dokumentasi dan alat developer di satu domain.

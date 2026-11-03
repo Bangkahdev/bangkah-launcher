@@ -1,107 +1,57 @@
-name: Publish to GitHub Packages
+name: Auto Issue Resolver Bot
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
-  release:
-    types: [published]
+  issue_comment:
+    types:
+      - created
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
 
 jobs:
-  publish:
+  resolve-issue:
+    if: |
+      github.event.issue.state == 'open' &&
+      contains(github.event.comment.body, '/run-bot')
+
     runs-on: ubuntu-latest
-    environment: GITHUB_TOKEN
+
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.4'
-          extensions: mbstring, pdo, pdo_mysql, bcmath, xml, zip, gd
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - name: Cache Composer dependencies
-        uses: actions/cache@v4
-        with:
-          path: vendor
-          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-composer-
-
-      - name: Install Composer dependencies
-        run: composer install --no-interaction --prefer-dist --optimize-autoloader
-
-      - name: Prepare Laravel Application
+      - name: Update README
         run: |
-          cp .env.example .env
-          mkdir -p storage/logs bootstrap/cache
-          chmod -R 777 storage bootstrap/cache
-          php artisan key:generate
+          {
+            echo ""
+            echo "## Deployment Guide (Railway & Render)"
+            echo ""
+            echo "- Generated from Issue #${{ github.event.issue.number }}"
+            echo "- Issue: ${{ github.event.issue.title }}"
+            echo "- Triggered by @${{ github.event.comment.user.login }}"
+          } >> README.md
 
-      - name: Configure GitHub Packages Auth
-        run: composer config --global github-oauth.github.com ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Ensure composer.lock is up to date
-        run: composer update --lock
-
-      - name: Publish to GitHub Packages
-        run: |
-          composer config repositories.github-packages composer https://packagist.pkg.github.com/Bangkah
-          composer config --global github-oauth.github.com ${{ secrets.GITHUB_TOKEN }}
-          composer validate --strict
-          composer install --no-interaction --prefer-dist --optimize-autoloader
-          composer publish || echo "composer publish failed, please check configuration."
-        env:
-          COMPOSER_AUTH: '{"github-oauth": {"github.com": "${{ secrets.GITHUB_TOKEN }}"}}'
-      - name: Cache npm dependencies
-        uses: actions/cache@v4
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
         with:
-          path: node_modules
-          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-npm-
+          token: ${{ secrets.PAT_TOKEN }}
+          branch: bot/issue-${{ github.event.issue.number }}
+          delete-branch: true
+          commit-message: |
+            docs: update README for issue #${{ github.event.issue.number }}
+          title: |
+            docs: Resolve #${{ github.event.issue.number }}
+          body: |
+            ## Automated Pull Request
 
-      - name: Build release archive
-        run: |
-          mkdir -p dist
-          git archive --format=zip --output=dist/bangkah-$(date +'%Y%m%d').zip HEAD
+            This PR was automatically generated.
 
-      - name: Generate SHA256SUMS
-        run: |
-          chmod +x scripts/generate-release-checksums.sh
-          ./scripts/generate-release-checksums.sh dist
+            **Issue:** #${{ github.event.issue.number }}
+            **Title:** ${{ github.event.issue.title }}
 
-      - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-artifacts
-          path: dist/
+            Triggered by:
+            @${{ github.event.comment.user.login }}
 
-      - name: Create GitHub Release and Upload Artifacts
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/bangkah-*.zip
-            dist/SHA256SUMS
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Update CHANGELOG.md
-        uses: heinrichreimer/github-changelog-generator-action@v2.3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          output: CHANGELOG.md
-
-      - name: Commit and push updated CHANGELOG.md
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md
-          git commit -m "chore: update changelog [skip ci]" || echo "No changes to commit"
-          git push origin HEAD:main || echo "No changes to push"
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./coverage.xml
-          fail_ci_if_error: true
-          token: ${{ secrets.GITHUB_TOKEN }}
+            Closes #${{ github.event.issue.number }}
